@@ -18,7 +18,7 @@ def welcome(username):
         #g.play('/static/Untitled.wav')
         g.say("Hello, this the American Institutes for Research calling for " +
               username +
-              ". Press 1 to for Georgetown Cupcakes or Press 2 for doughnuts", voice="alice", language="en-US")
+              ". Press 1 to for option 1 or Press 2 for option 2", voice="alice", language="en-US")
     return twiml(response)
 
 @app.route('/ivr/menu', methods=['POST'])
