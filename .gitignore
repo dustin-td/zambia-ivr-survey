@@ -1,0 +1,5 @@
+static
+venv
+ngrok.exe
+*.pyc
+test.py
