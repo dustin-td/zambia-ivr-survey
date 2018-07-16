@@ -3,3 +3,4 @@ venv
 ngrok.exe
 *.pyc
 test.py
+db.sqlite

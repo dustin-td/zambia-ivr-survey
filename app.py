@@ -2,58 +2,94 @@ import flask
 from flask import Flask
 from flask import render_template, redirect, url_for, request, session, flash
 from twilio.twiml.voice_response import Play, VoiceResponse
+import sqlite3 as sql
+from functools import wraps
+import re, json
+
 app = Flask(__name__, static_url_path='/static')
 
-
+# Setup routes
 
 @app.route('/')
 @app.route('/ivr')
 def home():
     return render_template('index.html')
 
-@app.route('/ivr/welcome/<string:username>', methods=['GET', 'POST'])
-def welcome(username):
+@app.route('/ivr/incoming', methods=['GET','POST'])
+def incoming():
     response = VoiceResponse()
-    with response.gather(num_digits=1, action=url_for('menu'), method='POST') as g:
-        #g.play('/static/Untitled.wav')
-        g.say("Hello, this the American Institutes for Research calling for " +
-              username +
-              ". Press 1 to for option 1 or Press 2 for option 2", voice="alice", language="en-US")
+    response.say('Please leave a message')
+    response.record()
+    response.hangup()
+
     return twiml(response)
 
-@app.route('/ivr/menu', methods=['POST'])
-def menu():
-    selected_option = request.form['Digits']
-    option_actions = {'1': _press1,
-                      '2': _press2}
-    if option_actions.has_key(selected_option):
-        response = VoiceResponse()
-        option_actions[selected_option](response)
-        return twiml(response)
+@app.route('/ivr/init/<string:id>/<string:version>', methods=['GET', 'POST'])
+def init(id,version):
+    # Load survey
+    with open('survey' + version + '.json') as f:
+        survey_def = json.loads(f.read())
+        questions = survey_def['questions']
+        session['questions'] = questions
 
-    return _redirect_welcome()
+    # Set response
+    response = VoiceResponse()
+    # Set ID in database
+    with sql.connect('db.sqlite') as conn:
+        c = conn.cursor()
+        c.execute('INSERT OR IGNORE INTO keypresses (ID) VALUES ({id})'.\
+                  format(id=id))
+    # Set session ID
+    session['id'] = id
+    # Start with first question
+    session['q'] = 1
+    [question] = [x for x in questions if x['ID'] == 1]
+    return play_question(response, id, question)
+
+
+@app.route('/ivr/survey', methods=['GET', 'POST'])
+def survey():
+    selection = request.form['Digits']
+    with sql.connect('db.sqlite') as conn:
+        c = conn.cursor()
+        c.execute('UPDATE keypresses SET Q{q}=({dg}) WHERE ID=({id})'.\
+                  format(q=session['q'], dg=selection, id=session['id']))
+
+    [oq] = [x for x in session['questions'] if x['ID'] == int(session['q'])]
+
+    if str(selection) in oq['keypresses'].keys():
+        session['q'] = oq['keypresses'][str(selection)]
+        [question] = [x for x in session['questions'] if x['ID'] == int(session['q'])]
+        response = VoiceResponse()
+        return play_question(response, session['id'], question)
+
+    else:
+        response = VoiceResponse()
+        return play_question(response, session['id'], oq)
 
 # Private methods
 
-def _press1(response):
-    response.say('Sorry, wrong answer', voice='alice', language='en-GB')
-    response.hangup()
-    return response
-
-def _press2(response):
-    response.say("Horay!", voice='alice', language='en-GB')
-    response.hangup()
-    return response
+def play_question(response, id, question):
+    if question['keypresses']:
+        with response.gather(num_digits=1, action=url_for('survey'), method='POST') as g:
+            for audio in question['audio']:
+                if re.match("<.*>", audio) is not None:
+                    p = '/static/' + audio.replace('<', '').replace('>', '/') + id + '.wav'
+                    g.play(p)
+                else:
+                    g.play(audio)
+        return twiml(response)
+    else:
+        response.play(question['audio'][0])
+        response.hangup()
+        return twiml(response)
 
 def twiml(resp):
     resp = flask.Response(str(resp))
     resp.headers['Content-Type'] = 'text/xml'
     return resp
 
-def _redirect_welcome():
-    response = VoiceResponse()
-    response.say("Returning to main menu", voice="alice", language="en-GB")
-    response.redirect(url_for('welcome'))
 
 if __name__ == "__main__":
+    app.secret_key = 'asdf8904urasdf89a823urp9sdf0'
     app.run()
