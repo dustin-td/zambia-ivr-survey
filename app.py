@@ -67,17 +67,29 @@ def survey():
         response = VoiceResponse()
         return play_question(response, session['id'], oq)
 
+@app.route('/ivr/redirect', methods=['GET','POST'])
+def redirect():
+    if 'redirect' not in session:
+        session['redirect'] = 1
+    else:
+        session['redirect'] = int(session['redirect']) + 1
+    response = VoiceResponse()
+    [oq] = [x for x in session['questions'] if x['ID'] == int(session['q'])]
+    return play_question(response, session['id'], oq, int(session['redirect']))
+
 # Private methods
 
-def play_question(response, id, question):
+def play_question(response, id, question, redir=0):
     if question['keypresses']:
-        with response.gather(num_digits=1, action=url_for('survey'), method='POST') as g:
+        with response.gather(num_digits=1, action=url_for('survey'), method='POST', timeout=15) as g:
             for audio in question['audio']:
                 if re.match("<.*>", audio) is not None:
                     p = '/static/' + audio.replace('<', '').replace('>', '/') + id + '.wav'
                     g.play(p)
                 else:
                     g.play(audio)
+        if redir <= 2:
+            response.redirect(url_for('redirect'), method='GET')
         return twiml(response)
     else:
         response.play(question['audio'][0])
